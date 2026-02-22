@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <title>VRM Tracking</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: monospace; }
+        canvas { display: block; }
+
+        #debug_panel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }
+
+        .preview-box {
+            width: 240px;
+            background: rgba(0,0,0,0.8);
+            border: 2px solid #555;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .label {
+            color: #00ff00;
+            font-size: 10px;
+            padding: 2px 5px;
+            background: #333;
+        }
+
+        #toggle_btn {
+            position: fixed;
+            top: 10px;
+            left: 260px;
+            z-index: 1001;
+            padding: 6px 12px;
+            background: #222;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #fps_display {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            color: #00ff00;
+            z-index: 1002;
+            background: rgba(0,0,0,0.5);
+            padding: 2px 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="fps_display">FPS: 0</div>
+    <button id="toggle_btn">Hide Raw Camera</button>
+
+    <div id="debug_panel">
+        <div id="raw_camera_box" class="preview-box">
+            <div class="label">RAW CAMERA</div>
+            <video id="input_video" style="width: 100%; display: block; transform: scaleX(-1);"></video>
+        </div>
+
+        <div id="bone_canvas_box" class="preview-box" style="border-color: #00ff00;">
+            <div class="label">TRACKING BONES</div>
+            <canvas id="debug_canvas" style="width: 100%; display: block; transform: scaleX(-1);"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/kalidokit@1.1.5/dist/kalidokit.umd.js"></script>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.1.0/lib/three-vrm.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRMViewer } from './vrm.js';
+
+        const rawCameraBox = document.getElementById('raw_camera_box');
+        const toggleBtn = document.getElementById('toggle_btn');
+        let isRawVisible = true;
+
+        toggleBtn.addEventListener('click', () => {
+            isRawVisible = !isRawVisible;
+            rawCameraBox.style.display = isRawVisible ? 'block' : 'none';
+            toggleBtn.textContent = isRawVisible ? 'Show Raw Camera' : 'Hide Raw Camera';
+        });
+        const viewer = new VRMViewer();
+        viewer.loadModel('./Sendagaya_Shibu.vrm'); 
+
+        const fpsLog = [];
+        viewer.onUpdate = (delta) => {
+            const fps = 1 / delta;
+            fpsLog.push(fps);
+            if (fpsLog.length > 30) fpsLog.shift();
+            
+            const avgFps = Math.round(fpsLog.reduce((a, b) => a + b) / fpsLog.length);
+            const fpsElement = document.getElementById('fps_display');
+            if (fpsElement) {
+                fpsElement.innerText = `FPS: ${avgFps}`;
+            }
+        };
+    </script>
+</body>
+</html>
