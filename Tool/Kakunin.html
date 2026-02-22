@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vrm確認する</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.1.0/lib/three-vrm.module.js"
+            }
+        }
+    </script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .bone-item:hover {
+            background-color: #f3f4f6;
+        }
+        .humanoid-tag {
+            font-size: 0.7rem;
+            padding: 1px 4px;
+            border-radius: 4px;
+            background-color: #dbeafe;
+            color: #1e40af;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900">
+
+    <div class="max-w-4xl mx-auto p-6">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-indigo-700">VRM Joint Inspector</h1>
+            <p class="text-gray-600 mt-2">VRMファイルを読み込んで、関節（ボーン）構造を解析します。</p>
+        </header>
+
+        <!-- Drop Zone -->
+        <div id="drop-zone" class="border-4 border-dashed border-gray-300 rounded-xl p-10 text-center bg-white hover:border-indigo-400 transition-colors cursor-pointer mb-6">
+            <div class="flex flex-col items-center">
+                <svg class="w-12 h-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+                <p class="text-lg font-medium">VRMファイルをドラッグあんどドロップ、またはクリックして選択</p>
+                <p class="text-sm text-gray-500 mt-1">.vrm ファイルに対応しています</p>
+            </div>
+            <input type="file" id="file-input" class="hidden" accept=".vrm">
+        </div>
+
+        <div id="result-container" class="hidden space-y-6">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div class="w-full md:w-1/2 relative">
+                    <input type="text" id="search-input" placeholder="ボーン名で検索..." class="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+                </div>
+                <div class="text-sm text-gray-500">
+                    検出された関節数: <span id="bone-count" class="font-bold text-indigo-600">0</span>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md overflow-hidden border border-gray-200">
+                <div class="bg-gray-100 px-4 py-2 border-b border-gray-200 flex justify-between font-semibold text-sm">
+                    <span>ボーン名 / パス</span>
+                    <span>タイプ</span>
+                </div>
+                <div id="bone-list" class="max-h-[500px] overflow-y-auto custom-scrollbar divide-y divide-gray-100">
+                </div>
+            </div>
+        </div>
+
+        <div id="loader" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div class="bg-white p-6 rounded-lg shadow-xl flex flex-col items-center">
+                <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4"></div>
+                <p>ファイルを解析中...</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { VRMLoaderPlugin } from '@pixiv/three-vrm';
+
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const loaderOverlay = document.getElementById('loader');
+        const resultContainer = document.getElementById('result-container');
+        const boneList = document.getElementById('bone-list');
+        const boneCountEl = document.getElementById('bone-count');
+        const searchInput = document.getElementById('search-input');
+
+        let allBones = [];
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-400'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-indigo-400'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-indigo-400');
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        async function handleFile(file) {
+            if (!file.name.toLowerCase().endsWith('.vrm')) {
+                alert('VRMファイルを選択してください。');
+                return;
+            }
+
+            loaderOverlay.classList.remove('hidden');
+            
+            try {
+                const url = URL.createObjectURL(file);
+                const loader = new GLTFLoader();
+                loader.register((parser) => new VRMLoaderPlugin(parser));
+
+                const gltf = await loader.loadAsync(url);
+                const vrm = gltf.userData.vrm;
+
+                processVRM(vrm, gltf.scene);
+                
+                URL.revokeObjectURL(url);
+                resultContainer.classList.remove('hidden');
+            } catch (error) {
+                console.error(error);
+                alert('ファイルの解析に失敗しました。');
+            } finally {
+                loaderOverlay.classList.add('hidden');
+            }
+        }
+
+        function processVRM(vrm, scene) {
+            allBones = [];
+            const humanoidMap = new Map();
+            if (vrm && vrm.humanoid) {
+                // VRM 1.0 style
+                const humanBones = vrm.humanoid.humanBones;
+                for (const [key, value] of Object.entries(humanBones)) {
+                    if (value && value.node) {
+                        humanoidMap.set(value.node.name, key);
+                    }
+                }
+            }
+
+            scene.traverse((object) => {
+                if (object.name) {
+                    allBones.push({
+                        name: object.name,
+                        type: object.type,
+                        isHumanoid: humanoidMap.has(object.name),
+                        humanoidName: humanoidMap.get(object.name) || null
+                    });
+                }
+            });
+            allBones = Array.from(new Set(allBones.map(b => b.name)))
+                .map(name => allBones.find(b => b.name === name))
+                .sort((a, b) => a.name.localeCompare(b.name));
+
+            displayBones(allBones);
+        }
+
+        function displayBones(bones) {
+            boneList.innerHTML = '';
+            boneCountEl.textContent = bones.length;
+
+            bones.forEach(bone => {
+                const div = document.createElement('div');
+                div.className = 'bone-item p-4 flex justify-between items-center transition-colors';
+                div.dataset.name = bone.name.toLowerCase();
+
+                const leftSide = document.createElement('div');
+                leftSide.className = 'flex items-center';
+                
+                const nameLabel = document.createElement('span');
+                nameLabel.className = 'font-mono text-sm break-all';
+                nameLabel.textContent = bone.name;
+                leftSide.appendChild(nameLabel);
+
+                if (bone.isHumanoid) {
+                    const tag = document.createElement('span');
+                    tag.className = 'humanoid-tag font-sans';
+                    tag.textContent = `Humanoid: ${bone.humanoidName}`;
+                    leftSide.appendChild(tag);
+                }
+
+                const rightSide = document.createElement('div');
+                rightSide.className = 'text-xs text-gray-400 px-2 py-1 bg-gray-50 rounded border';
+                rightSide.textContent = bone.type;
+
+                div.appendChild(leftSide);
+                div.appendChild(rightSide);
+                boneList.appendChild(div);
+            });
+        }
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            const items = boneList.querySelectorAll('.bone-item');
+            let count = 0;
+
+            items.forEach(item => {
+                if (item.dataset.name.includes(term)) {
+                    item.classList.remove('hidden');
+                    count++;
+                } else {
+                    item.classList.add('hidden');
+                }
+            });
+            
+            boneCountEl.textContent = count;
+        });
+
+    </script>
+</body>
+</html>
